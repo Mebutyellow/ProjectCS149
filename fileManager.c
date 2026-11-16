@@ -5,118 +5,107 @@
 #include <time.h>
 
 
-#define NUM_BLOCKS 100
-#define BLOCK_SIZE (1024 * 64)
-#define MAX_FILES 100
-#define FILE_NAME_LENGTH 32
+#define NUM_SECTORS 100     // 100 blocks total the first block is the subdirectory
+#define SECTOR_SIZE 512     // 512 bytes, integer = 4 bytes
+#define DIR_ENTRIES 25      // if more files come, then need to create another directory sector
+#define DATA_SIZE   504     // 504 since forward and backward take 8 bytes total
+#define FILE_NAME_LENGTH 9  // max name lenght is 8 characters + '\0\' for the end of character
+
+union block {
+
+    struct directory{
+
+        int back;
+        int frwd;
+        int free;
+
+        struct {
+            char type;
+            char name[9];
+            int link;
+            short size;
+        } dir[25];
+
+    } directory;
 
 
-typedef struct {
+    struct file{
 
-    char name[FILE_NAME_LENGTH];
-    int fd;
-    int size;
-    int startBlock;
-    int blocksAllocated;
-    time_t created;
-    time_t modified;
+        int backf;
+        int frwdf;
+        char userdata[504];
 
-} MetaData;
+    } file;
 
+};
 
-MetaData metaDataArray[MAX_FILES];
-char blockArray[NUM_BLOCKS][BLOCK_SIZE];
-int nextArray[NUM_BLOCKS];
-int bitmapArray[NUM_BLOCKS];
+struct nodeType {
+    int info;
+    struct nodeType *link;
+};
 
+union block sector[100];
 
 
-int createFile();
-int deleteFile();
-int writeFile();
-void readFile();
-void listFile();
-void printOptions();
+void createSector(int index, int b, int f){
+    sector[index].directory.back = b;
+    sector[index].directory.frwd = f;
+    sector[index].directory.free = 25;
+
+    for (int i = 0; i < 25; i++) {
+        sector[index].directory.dir[i].type = 'F';
+        sector[index].directory.dir[i].name[0] = '\0';
+        sector[index].directory.dir[i].link = 0;
+        sector[index].directory.dir[i].size = 0;
+    }
+}
 
 
 
-int main(){
+int main(void){
 
-    printf("Welcome to the file managment system project:\n");
-    printf("This file managment system will have %d blocks with %d bytes of data for each block\n", NUM_BLOCKS, BLOCK_SIZE);
+    createSector(0, -1, -1);
 
-    char input[100];
+    printf("Welcome to the file management system project:\n");
+    printf("This file system has %d sectors with %d bytes each.\n", NUM_SECTORS, SECTOR_SIZE);
+
+
+
+    char input[256];
+    char cmd[16];
 
     while (1) {
 
-        printOptions();
-        printf("Enter option: ");
+        printf(">> ");
 
         if (fgets(input, sizeof(input), stdin) == NULL) break;
         input[strcspn(input, "\n")] = '\0';
-        if (strcmp(input, "-q") == 0) break;
+        if (sscanf(input, "%15s", cmd) != 1) continue;   // blank line, ask again
 
 
+        if (strcmp(cmd, "EXIT") == 0) {
+            break;
+        } else if (strcmp(cmd, "CREATE") == 0) {
 
-        if (strcmp(input, "-c") == 0) {
-            createFile();
-        } else if (strcmp(input, "-d") == 0) {
-            deleteFile();
-        } else if (strcmp(input, "-w") == 0) {
-            writeFile();
-        } else if (strcmp(input, "-r") == 0) {
-            readFile();
-        } else if (strcmp(input, "-l") == 0) {
-            listFile();
+            char type, name[16];
+            if (sscanf(input, "%*s %c %15s", &type, name) != 2)
+                printf("Usage: CREATE <U|D> <name>\n");
+            else
+                printf("create %c %s\n", type, name);    // call your real function here
+
+
+        } else if (strcmp(cmd, "DIR") == 0) {
+            
+            printf("dir\n");                              // call your real function here
+
         } else {
-            printf("Invalid option.\n");
+            printf("Invalid command.\n");
         }
+
+
+
     }
 
-
-    printf("Thank you for using our file system!\n");
     return 0;
-
-
-    
-}
-
-
-void printOptions() {
-    printf("\nYou have the options of:\n");
-    printf("Create file:    '-c'\n");
-    printf("Delete file:    '-d'\n");
-    printf("Write to file:  '-w'\n");
-    printf("Read file:      '-r'\n");
-    printf("List files:     '-l'\n");
-    printf("Quit program:   '-q'\n");
-}
-
-
-
-
-int createFile(){
-    return 0;
-}
-
-
-int deleteFile(){
-    return 0;
-
-}
-
-
-int writeFile(){
-    return 0;
-
-}
-
-
-void readFile(){
-
-}
-
-
-void listFile(){
 
 }
