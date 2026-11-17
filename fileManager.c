@@ -29,13 +29,13 @@ union block {
     } directory;
 
 
-    struct file{
+    struct{
 
         int backf;
         int frwdf;
         char userdata[504];
 
-    } file;
+    } data;
 
 };
 
@@ -46,6 +46,8 @@ struct nodeType {
 
 union block sector[100];
 
+static struct nodeType *free_list;
+static int current_directory;
 
 void createSector(int index, int b, int f){
     sector[index].directory.back = b;
@@ -60,6 +62,56 @@ void createSector(int index, int b, int f){
     }
 }
 
+static void freeList(void)
+{
+    struct nodeType *node;
+    while (free_list != NULL) {
+        node = free_list;
+        free_list = node->link;
+        free(node);
+    }
+}
+
+static int buildList(void)
+{
+    int i;
+    free_list = NULL;
+    for (i = NUM_SECTORS - 1; i >= 0; --i) {
+        struct nodeType *node = malloc(sizeof(struct nodeType));
+        if (node == NULL)
+            return 0;
+        node->info = i;
+        node->link = free_list;
+        free_list = node;
+    }
+    return 1;
+}
+
+static int Remove(void)
+{
+    struct nodeType *node;
+    int result;
+    if (free_list == NULL)
+        return -1;
+    node = free_list;
+    free_list = node->link;
+    result = node->info;
+    free(node);
+    return result;
+}
+
+static void Insert(int sector_number)
+{
+    struct nodeType *node = malloc(sizeof(struct nodeType));
+    if (node == NULL) {
+        fprintf(stderr, "Unable to return sector %d to the free list.\n",
+                sector_number);
+        return;
+    }
+    node->info = sector_number;
+    node->link = free_list;
+    free_list = node;
+}
 
 
 int main(void){
