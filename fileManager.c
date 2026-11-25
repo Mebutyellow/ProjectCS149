@@ -69,6 +69,14 @@ static char current_path[128] = "~";
 
 
 
+
+static void cdRoot(void) {
+    current_directory = 0;
+    strcpy(current_path, "~");
+}
+
+
+
 void createSector(int index, int b, int f){
     sector[index].directory.back = b;
     sector[index].directory.frwd = f;
@@ -440,6 +448,115 @@ static void writeFile(int count, const char *data) {
 
 
 
+static void readFile(int count) {
+    if (!openInformation.isOpen) {
+        printf("Error: no file is open.\n");
+        return;
+    }
+
+    if (openInformation.mode == 'O') {
+        printf("Error: file is open for output only.\n");
+        return;
+    }
+
+    if (count <= 0) {
+        printf("Error: byte count must be positive.\n");
+        return;
+    }
+
+    struct dirEntry *e = &sector[openInformation.dirSector].directory.dir[openInformation.dirIndex];
+    int pos = openInformation.position;
+    int size = e->size;
+
+    if (pos >= size || e->link == 0) {
+        printf("0 bytes read (end of file).\n");
+        return;
+    }
+
+    if (count > size - pos)
+        count = size - pos;
+
+    int cur = e->link;
+    for (int i = 0; i < pos / DATA_SIZE; i++)
+        cur = sector[cur].data.frwdf;
+
+    int offset = pos % DATA_SIZE;
+    int done = 0;
+
+    printf("Data: ");
+    while (done < count && cur != 0) {
+        int room = DATA_SIZE - offset;
+        int chunk = (count - done < room) ? (count - done) : room;
+
+        fwrite(sector[cur].data.userdata + offset, 1, chunk, stdout);
+        done += chunk;
+        offset = 0;
+        cur = sector[cur].data.frwdf;
+    }
+    printf("\n");
+
+    openInformation.position = pos + done;
+    printf("%d bytes read.\n", done);
+}
+
+
+
+static void deleteEntry(const char *name) {
+    int dir_sector;
+    int idx = findFile(current_directory, name, &dir_sector);
+
+    if (idx == -1) {
+        printf("Error: '%s' not found.\n", name);
+        return;
+    }
+
+    struct dirEntry *e = &sector[dir_sector].directory.dir[idx];
+
+    if (openInformation.isOpen &&
+        openInformation.dirSector == dir_sector &&
+        openInformation.dirIndex == idx) {
+        printf("Error: '%s' is currently open. CLOSE it first.\n", name);
+        return;
+    }
+
+    if (e->type == 'U') {
+        int s = e->link;
+        while (s != 0) {
+            int next = sector[s].data.frwdf;
+            Insert(s);
+            s = next;
+        }
+    } else if (e->type == 'D') {
+        // check that every sector of the subdirectory is empty
+        int s = e->link;
+        while (s > 0) {
+            if (sector[s].directory.free != DIR_ENTRIES) {
+                printf("Error: directory '%s' is not empty.\n", name);
+                return;
+            }
+            s = sector[s].directory.frwd;
+        }
+
+        // release every sector of the subdirectory's chain
+        s = e->link;
+        while (s > 0) {
+            int next = sector[s].directory.frwd;
+            Insert(s);
+            s = next;
+        }
+    }
+
+    e->type = 'F';
+    e->name[0] = '\0';
+    e->link = 0;
+    e->size = 0;
+    sector[dir_sector].directory.free++;
+
+    printf("'%s' deleted.\n", name);
+}
+
+
+
 
 int main(void){
 
@@ -541,7 +658,27 @@ int main(void){
                 writeFile(count, data);
             }
 
-        } else {
+        } else if (strcmp(cmd, "ROOT") == 0) {
+
+            cdRoot();
+
+        } else if (strcmp(cmd, "READ") == 0) {
+
+            int count;
+            if (sscanf(input, "%*s %d", &count) != 1)
+                printf("Usage: READ <bytes>\n");
+            else
+                readFile(count);
+
+        } else if (strcmp(cmd, "DELETE") == 0) {
+            
+            char name[16];
+            if (sscanf(input, "%*s %15s", name) != 1)
+                printf("Usage: DELETE <name>\n");
+            else
+                deleteEntry(name);
+
+        }else {
 
             printf("Invalid command.\n");
         }
