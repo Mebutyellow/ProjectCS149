@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <ctype.h>
 
 
@@ -44,6 +43,22 @@ struct nodeType {
     int info;
     struct nodeType *link;
 };
+
+
+
+
+struct openFileInfo{
+    int isOpen;
+    int dirSector;
+    int dirIndex;
+    char mode;
+    int position;
+};
+
+
+static struct openFileInfo openInformation;
+
+
 
 union block sector[100];
 
@@ -262,10 +277,165 @@ static void changeDirectory(const char *name){
 
 
 
+static void openFile(char mode, const char *name){
+
+    if (mode != 'I' && mode != 'O' && mode != 'U') {
+        printf("Error: mode must be I, O, or U.\n");
+        return;
+    }
+
+    if (openInformation.isOpen) {
+        printf("Error: a file is already open.\n");
+        return;
+    }
+
+    int dir_sector;
+    int entry_index = findFile(current_directory, name, &dir_sector);
+
+    if (entry_index == -1) {
+        printf("Error: file '%s' not found.\n", name);
+        return;
+    }
+
+    if (sector[dir_sector].directory.dir[entry_index].type != 'U') {
+        printf("Error: '%s' is not a user file.\n", name);
+        return;
+    }
+
+    openInformation.isOpen = 1;
+    openInformation.dirSector = dir_sector;
+    openInformation.dirIndex = entry_index;
+    openInformation.mode = mode;
+    if (mode == 'O'){
+        openInformation.position = sector[dir_sector].directory.dir[entry_index].size;
+    } else{
+        openInformation.position = 0;
+    }
+
+    printf("File '%s' opened in mode '%c'.\n", name, mode);
+}
+
+
+static void closeFile(void){
+
+    if (!openInformation.isOpen) {
+        printf("Error: no file is currently open.\n");
+        return;
+    }
+
+    openInformation.isOpen = 0;
+    openInformation.dirSector = 0;
+    openInformation.dirIndex = 0;
+    openInformation.mode = '\0';
+    openInformation.position = 0;
+
+
+    printf("File closed.\n");
+}
+
+
+static void seek(int position){
+
+    if (!openInformation.isOpen) {
+        printf("Error: no file is currently open.\n");
+        return;
+    }
+
+    int file_size = sector[openInformation.dirSector].directory.dir[openInformation.dirIndex].size;
+
+    if (position < 0 || position > file_size) {
+        printf("Error: position %d is out of bounds for file size %d.\n", position, file_size);
+        return;
+    }
+
+    openInformation.position = position;
+    printf("Seeked to position %d in the file.\n", position);
+}
 
 
 
 
+static void writeFile(int count, const char *data) {
+    if (!openInformation.isOpen) {
+        printf("Error: no file is open.\n");
+        return;
+    }
+
+    if (openInformation.mode == 'I') {
+        printf("Error: file is open for input only.\n");
+        return;
+    }
+
+    if (count <= 0) {
+        printf("Error: byte count must be positive.\n");
+        return;
+    }
+
+    if ((int)strlen(data) < count) {
+        printf("Error: fewer than %d data bytes were provided.\n", count);
+        return;
+    }
+
+    struct dirEntry *e = &sector[openInformation.dirSector].directory.dir[openInformation.dirIndex];
+    int pos = openInformation.position;
+
+    if (pos + count > 32767) {
+        printf("Error: file size cannot exceed 32767 bytes.\n");
+        return;
+    }
+
+    int cur = e->link;
+    int prev = 0;
+    int skip = pos / DATA_SIZE;
+    for (int i = 0; i < skip; i++) {
+        prev = cur;
+        cur = sector[cur].data.frwdf;
+    }
+
+    int offset = pos % DATA_SIZE;
+    int written = 0;
+
+    while (written < count) {
+
+        if (cur == 0) {                       
+            int n = Remove();
+            if (n == -1) {
+                printf("Error: disk full. Only %d bytes written.\n", written);
+                break;
+            }
+            memset(sector[n].data.userdata, 0, DATA_SIZE);
+            sector[n].data.backf = prev;
+            sector[n].data.frwdf = 0;
+
+            if (prev == 0)
+                e->link = n;                  
+            else
+                sector[prev].data.frwdf = n;
+
+            cur = n;
+        }
+
+        int room = DATA_SIZE - offset;
+        int chunk = (count - written < room) ? (count - written) : room;
+
+        memcpy(sector[cur].data.userdata + offset, data + written, chunk);
+        written += chunk;
+        offset += chunk;
+
+        if (written < count) {                
+            prev = cur;
+            cur = sector[cur].data.frwdf;
+            offset = 0;
+        }
+    }
+
+    pos += written;
+    openInformation.position = pos;
+    if (pos > e->size)
+        e->size = (short)pos;
+
+    printf("%d bytes written.\n", written);
+}
 
 
 
@@ -281,6 +451,7 @@ int main(void){
 
 
     createSector(0, -1, -1);
+    openInformation.isOpen = 0;
 
     if (!buildList()) {
         printf("Error: could not build the free-sector list.\n");
@@ -297,7 +468,7 @@ int main(void){
 
 
 
-    char input[256];
+    char input[2048];
     char cmd[16];
 
     while (1) {
@@ -338,7 +509,40 @@ int main(void){
                 changeDirectory(name);
             }
 
+        } else if (strcmp(cmd, "OPEN") == 0) {
+
+            char mode, name[16];
+            if (sscanf(input, "%*s %c %15s", &mode, name) != 2){
+                printf("Usage: OPEN <I|O|U> <name>\n");
+        
+            } else{
+                openFile(toupper((unsigned char)mode), name);
+            }
+
+        } else if (strcmp(cmd, "CLOSE") == 0) {
+            closeFile();
+
+        } else if (strcmp(cmd, "SEEK") == 0) {
+
+            int position;
+            if (sscanf(input, "%*s %d", &position) != 1) {
+                printf("Usage: SEEK <position>\n");
+            } else {
+                seek(position);
+            }
+
+        } else if (strcmp(cmd, "WRITE") == 0) {
+            int count, pos = 0;
+            if (sscanf(input, "%*s %d%n", &count, &pos) != 1 || pos == 0) {
+                printf("Usage: WRITE <bytes> <data>\n");
+            } else {
+                const char *data = input + pos;
+                if (*data == ' ') data++;     
+                writeFile(count, data);
+            }
+
         } else {
+
             printf("Invalid command.\n");
         }
 
